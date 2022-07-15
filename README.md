@@ -6,7 +6,7 @@ It can be useful for big projects with a lot of several small CSS and JS files.
 
 ### Usage examples
 
-**Template inline example Smarty 3**
+**Template inline example Smarty 3 or 4.1.0**
 
 ```{combine input=array('/bm.js','/bm2.js') output='/cache/big.js' use_true_path=false age='30' debug=false}```
 
