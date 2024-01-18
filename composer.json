@@ -26,6 +26,6 @@
     ],
     "require": {
         "php": ">=5.6.40",
-        "smarty/smarty": "~4.1.0"
+        "smarty/smarty": "~3.1|~4.1"
     }
 }
