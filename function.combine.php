@@ -17,7 +17,8 @@
  * Example: {combine input=$array_of_files_to_combine output=$path_to_output_file use_true_path=true age=$seconds_to_try_recombine_file}
  *
  * @author Gorochov Ivan <dead23angel at gmail dot com>
- * @version 1.0
+ * @author Vital Smereka <vds911 at yandex dot com>
+ * @version 1.4
  * @param array
  * @param string
  * @param int
@@ -35,7 +36,7 @@ function smarty_function_combine($params, &$smarty)
      * @param array $params
      */
     if ( ! function_exists('smarty_build_combine')) {
-        function smarty_build_combine($params)
+        function smarty_build_combine($params, $skip_out_for_shutdown = false)
         {
             $filelist = array();
             $lastest_mtime = 0;
@@ -46,13 +47,13 @@ function smarty_function_combine($params, &$smarty)
                 $filelist[] = array('name' => $item, 'time' => $mtime);
             }
 
-            if ($params['debug'] == true) {
+            if ($params['debug'] === true) {
                 $output_filename = '';
                 foreach ($filelist as $file) {
                     if ($params['type'] == 'js') {
-                        $output_filename .= '<script type="text/javascript" src="' . base_url() . $file['name'].'" charset="utf-8"></script>' . "\n";
+                        $output_filename .= '<script type="text/javascript" src="' . base_url() . $file['name'] . '?' . $file['time'] . '" charset="utf-8"></script>' . "\n";
                     } elseif ($params['type'] == 'css') {
-                        $output_filename .= '<link type="text/css" rel="stylesheet" href="' . base_url() . $file['name'] . '" />' . "\n";
+                        $output_filename .= '<link type="text/css" rel="stylesheet" href="' . base_url() . $file['name'] . '?' . $file['time'] . '" />' . "\n";
                     }
                 }
 
@@ -63,7 +64,7 @@ function smarty_function_combine($params, &$smarty)
             $last_cmtime = 0;
 
             if (file_exists($params['file_path'] . $params['cache_file_name'])) {
-                $last_cmtime = file_get_contents($params['file_path'] . $params['cache_file_name']);
+                $last_cmtime = filemtime($params['file_path'] . $params['cache_file_name']);
             }
 
             if ($lastest_mtime > $last_cmtime) {
@@ -83,6 +84,8 @@ function smarty_function_combine($params, &$smarty)
                 if ( ! is_dir($dirname)) {
                     mkdir($dirname, 0755, true);
                 }
+
+				$sleep = checkWritabeFile($params['file_path'] . $output_filename);
 
                 $fh = fopen($params['file_path'] . $output_filename, 'w');
 
@@ -112,8 +115,11 @@ function smarty_function_combine($params, &$smarty)
                 clearstatcache();
             }
 
-            touch($params['file_path'] . $params['cache_file_name']);
-            smarty_print_out($params);
+            touch($params['file_path'] . $params['cache_file_name'], $lastest_mtime);
+
+			if(!$skip_out_for_shutdown){
+				smarty_print_out($params);
+			}
         }
     }
 
@@ -125,18 +131,18 @@ function smarty_function_combine($params, &$smarty)
     if ( ! function_exists('smarty_print_out')) {
         function smarty_print_out($params)
         {
-            $last_mtime = 0;
+            $mtime = 0;
 
             if (file_exists($params['file_path'] . $params['cache_file_name'])) {
-                $last_mtime = file_get_contents($params['file_path'] . $params['cache_file_name']);
+				$mtime = filemtime($params['file_path'] . $params['cache_file_name']);
             }
 
-            $output_filename = preg_replace('/\.(js|css)$/i', date('_YmdHis.', $last_mtime) . '$1', $params['output']);
+            $output_filename = preg_replace('/\.(js|css)$/i', date('_YmdHis.', $mtime) . '$1', $params['output']);
 
             if ($params['type'] == 'js') {
-                echo '<script type="text/javascript" src="' . $output_filename . '" charset="utf-8"></script>';
+                echo '<script type="text/javascript" src="' . base_url() . $output_filename . '" charset="utf-8"></script>';
             } elseif ($params['type'] == 'css') {
-                echo '<link type="text/css" rel="stylesheet" href="' . $output_filename . '" />';
+                echo '<link type="text/css" rel="stylesheet" href="' . base_url() . $output_filename . '" />';
             } else {
                 echo $output_filename;
             }
@@ -151,7 +157,7 @@ function smarty_function_combine($params, &$smarty)
         function base_url(){
 
             return sprintf(
-                "%s://%s%s/",
+                "%s://%s%s",
                 isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] != 'off' ? 'https' : 'http',
                 $_SERVER['HTTP_HOST'],
                 rtrim(dirname($_SERVER['PHP_SELF']), '/\\')
@@ -222,18 +228,71 @@ function smarty_function_combine($params, &$smarty)
         $params['debug'] = false;
     }
 
-    $cache_file_name = $params['cache_file_name'];
+    /** Build combine in background fastcgi_finish_request() */
+    if ( ! function_exists('build_cache_combine')) {
+        function build_cache_combine($params){
+			register_shutdown_function(function($params){
+				ignore_user_abort(true);
 
-    if ($params['debug'] == true || ! file_exists($params['file_path'] . $cache_file_name)) {
-        smarty_build_combine($params);
-        return;
+				if (function_exists('fastcgi_finish_request')) {
+					fastcgi_finish_request();
+				}
+
+				smarty_build_combine($params, true);
+			}, $params);
+        }
     }
 
-    $cache_mtime = filemtime($params['file_path'] . $cache_file_name);
+	$file_cache_exists = file_exists($params['file_path'] . $params['cache_file_name']);
 
-    if ($cache_mtime + $params['age'] < time()) {
-        smarty_build_combine($params);
-    } else {
-        smarty_print_out($params);
+    $cache_mtime = $file_cache_exists ? filemtime($params['file_path'] . $params['cache_file_name']) : 0;
+
+    if ($params['debug'] === true || !$file_cache_exists) {
+		$time = time();
+
+		if($cache_mtime + $params['age'] < $time) {
+            $filelist = array();
+
+            foreach ($params['input'] as $item) {
+                $filelist[] = ['name' => $item];
+            }
+
+			$out = '';
+			foreach ($filelist as $file) {
+				if ($params['type'] == 'js') {
+					$out .= '<script type="text/javascript" src="' . base_url() . $file['name'] . '?' . $time . '" charset="utf-8"></script>' . "\n";
+				} elseif ($params['type'] == 'css') {
+					$out .= '<link type="text/css" rel="stylesheet" href="' . base_url() . $file['name'] . '?' . $time . '" />' . "\n";
+				}
+			}
+
+			echo $out;
+
+			//smarty_build_combine($params);
+			register_shutdown_function('build_cache_combine', $params);
+
+			return;
+		}
     }
+
+	smarty_print_out($params);
+}
+
+function checkWritabeFile($file)
+{
+	$i = 0;
+
+	while(!is_writable($file))
+	{
+		$i++;
+
+		if($i > 5)
+		{
+			break;
+		}
+
+		sleep(rand(0,2));
+	}
+
+	return $i;
 }

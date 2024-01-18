@@ -9,6 +9,11 @@
     ],
     "authors": [
         {
+            "name": "Vital Smereka",
+            "homepage": "https://github.com/2nlin3",
+            "role": "Developer"
+        },
+        {
             "name": "Gorochov Ivan",
             "homepage": "https://github.com/dead23angel",
             "role": "Developer"
@@ -20,7 +25,7 @@
         }
     ],
     "require": {
-        "php": ">=5.3.0",
-        "smarty/smarty": "~3.1"
+        "php": ">=5.6.40",
+        "smarty/smarty": "~4.1.0"
     }
 }
