@@ -4,8 +4,19 @@ require_once dirname(__DIR__) . '/function.combine.php';
 require_once dirname(__DIR__) . '/minify/JSmin.php';
 require_once dirname(__DIR__) . '/minify/CSSmin.php';
 
+if (isset($argv[1]) && $argv[1] === 'inspect') {
+    require_once dirname(__DIR__) . '/cli/inspect.php';
+    try {
+        combine_inspect(array_slice($argv, 2));
+        exit(0);
+    } catch (Exception $e) {
+        fwrite(STDERR, $e->getMessage() . "\n");
+        exit(1);
+    }
+}
+
 if (!isset($argv[1]) || $argv[1] !== 'build' || count($argv) > 3) {
-    fwrite(STDERR, "Usage: smarty-combine build [config.php]\n");
+    fwrite(STDERR, "Usage: smarty-combine build [config.php]\n       smarty-combine inspect [directory] [--json]\n");
     exit(1);
 }
 

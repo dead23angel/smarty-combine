@@ -109,3 +109,9 @@ In the application bootstrap, define `SMARTY_COMBINE_MANIFEST` as the absolute p
 ```
 
 Named bundles emit the root-relative URLs recorded in the manifest. Rendering requires read access to the manifest and no source files or writable cache directory. A missing manifest or unknown bundle raises an error. Existing calls that pass `input` continue to use runtime versioning.
+
+## Inspecting existing templates
+
+Run `vendor/bin/smarty-combine inspect templates` to find combine calls recursively in a directory (`.` by default). Add `--json` for a report with `calls` and `duplicates` arrays. Paths are relative to the scanned directory and line numbers start at 1.
+
+The scanner recognizes standard Smarty delimiters. It skips Smarty comments, literal blocks, symlinks and dependency directories. Literal lists written as `array('/a.js', '/b.js')` or `['/a.js', '/b.js']` are grouped by their exact ordered paths. Different output options may still need separate builds. Named bundles are listed separately. Variables and unrecognized input expressions appear as `review` with the source tag for manual inspection. The report describes template source and does not execute PHP or resolve assigned variables.

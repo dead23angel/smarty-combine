@@ -89,3 +89,26 @@ for attempt in 1 2 3 4 5; do
 done
 kill -0 "$server_pid" || { cat server.log >&2; exit 1; }
 php "$suite/check-manifest.php" "http://$address"
+
+mkdir inspect-templates
+cat > inspect-templates/example.tpl <<'TPL'
+{* {combine input=$ignored} *}
+{combine input=array('/a.js','/b.js')}
+{combine
+    input=['/a.js', '/b.js']}
+{combine input=['/b.js','/a.js']}
+{combine input=['/a.js', $dynamic]}
+{literal}{combine input=$ignored}{/literal}
+{combine bundle='styles'}
+TPL
+php "$suite/../bin/smarty-combine" inspect inspect-templates --json > inspect.json
+php -r '
+$r = json_decode(file_get_contents("inspect.json"), true);
+if (!$r || array_column($r["calls"], "kind") !== array("static", "static", "static", "review", "bundle")
+    || count($r["duplicates"]) !== 1
+    || $r["duplicates"][0]["files"] !== array("/a.js", "/b.js")
+    || array_column($r["duplicates"][0]["locations"], "line") !== array(2, 3)) {
+    fwrite(STDERR, "Unexpected inspect report\n");
+    exit(1);
+}'
+echo 'PASS: inspect reports ordered duplicates and dynamic inputs'
