@@ -91,19 +91,7 @@ function smarty_function_combine($params, &$smarty)
 
                 if (flock($fh, LOCK_EX)) {
                     foreach ($filelist as $file) {
-                        $min = '';
-
-                        $dirname = dirname(str_replace($_SERVER['DOCUMENT_ROOT'],'',$params['file_path'] . $file['name'])); 
-                                                
-                        if ($params['type'] == 'js') {
-                            $min = JSMin::minify(file_get_contents($params['file_path'] . $file['name'])) . ";" ;
-                        } elseif ($params['type'] == 'css') {
-                            $min = CSSMin::minify(preg_replace('/url\\(((?>["\']?))(?!(\\/|http(s)?:|data:|#))(.*?)\\1\\)/', 'url("' . $dirname . '/$4")', file_get_contents($params['file_path'] . $file['name'])));
-                        } else {
-                            fputs($fh, PHP_EOL . PHP_EOL . '/* ' . $file['name'] . ' @ ' . date('c', $file['time']) . ' */' . PHP_EOL . PHP_EOL);
-                            $min = file_get_contents($params['file_path'] . $file['name']);
-                        }
-
+                        $min = smarty_combine_minify_file($params, $file['name']);
                         fputs($fh, $min);
                     }
 
@@ -139,13 +127,7 @@ function smarty_function_combine($params, &$smarty)
 
             $output_filename = preg_replace('/\.(js|css)$/i', date('_YmdHis.', $mtime) . '$1', $params['output']);
 
-            if ($params['type'] == 'js') {
-                echo '<script type="text/javascript" src="' . base_url() . $output_filename . '" charset="utf-8"></script>';
-            } elseif ($params['type'] == 'css') {
-                echo '<link type="text/css" rel="stylesheet" href="' . base_url() . $output_filename . '" />';
-            } else {
-                echo $output_filename;
-            }
+            smarty_combine_print_tag($params['type'], $output_filename);
         }
     }
 
@@ -228,6 +210,13 @@ function smarty_function_combine($params, &$smarty)
         $params['debug'] = false;
     }
 
+    $version = isset($params['version']) ? $params['version']
+        : (defined('SMARTY_COMBINE_VERSION') ? SMARTY_COMBINE_VERSION : 'timestamp');
+    if ($version === 'hash' && !$params['debug']) {
+        smarty_combine_print_tag($params['type'], smarty_combine_hash_bundle($params));
+        return;
+    }
+
     /** Build combine in background fastcgi_finish_request() */
     if ( ! function_exists('build_cache_combine')) {
         function build_cache_combine($params){
@@ -276,6 +265,99 @@ function smarty_function_combine($params, &$smarty)
     }
 
 	smarty_print_out($params);
+}
+
+function smarty_combine_hash_bundle($params)
+{
+    if (!preg_match('/\.(js|css)$/iD', $params['output'])) {
+        throw new RuntimeException('Hash versioning requires a .css or .js output filename');
+    }
+    // Increment the format version when minification or URL rewriting changes.
+    $context = hash_init('sha256');
+    hash_update($context, serialize(array(1, $params['type'], $params['file_path'], $_SERVER['DOCUMENT_ROOT'])));
+    $sources = array();
+    foreach ($params['input'] as $name) {
+        $source = smarty_combine_read_source($params['file_path'] . $name);
+        hash_update($context, serialize(array($name, hash('sha256', $source))));
+        $sources[] = array($name, $source);
+    }
+    $key = hash_final($context);
+    $manifest = $params['file_path'] . $params['output'] . '.hash-cache';
+    $record = is_file($manifest) ? @file_get_contents($manifest) : false;
+    if ($record !== false && preg_match('/^' . $key . ' ([a-f0-9]{64})$/D', $record, $match)) {
+        $filename = preg_replace('/\.(js|css)$/iD', '.' . $match[1] . '.$1', $params['output']);
+        if (is_file($params['file_path'] . $filename)) {
+            return $filename;
+        }
+    }
+
+    $bundle = '';
+    foreach ($sources as $item) {
+        $bundle .= smarty_combine_minify_file($params, $item[0], $item[1]);
+    }
+    $digest = hash('sha256', $bundle);
+    $filename = preg_replace('/\.(js|css)$/iD', '.' . $digest . '.$1', $params['output']);
+    $target = $params['file_path'] . $filename;
+    if (!is_file($target)) {
+        smarty_combine_write_atomic($target, $bundle);
+    }
+    smarty_combine_write_atomic($manifest, $key . ' ' . $digest);
+    return $filename;
+}
+
+function smarty_combine_write_atomic($target, $bytes)
+{
+    $dir = dirname($target);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        throw new RuntimeException('Cannot create bundle directory');
+    }
+    $tmp = tempnam($dir, '.combine-');
+    if ($tmp === false) {
+        throw new RuntimeException('Cannot create temporary bundle');
+    }
+    try {
+        if (file_put_contents($tmp, $bytes) !== strlen($bytes)
+            || !chmod($tmp, 0666 & ~umask()) || !rename($tmp, $target)) {
+            throw new RuntimeException('Cannot publish bundle');
+        }
+    } finally {
+        if (is_file($tmp)) {
+            unlink($tmp);
+        }
+    }
+}
+
+function smarty_combine_print_tag($type, $output_filename)
+{
+    if ($type == 'js') {
+        echo '<script type="text/javascript" src="' . base_url() . $output_filename . '" charset="utf-8"></script>';
+    } elseif ($type == 'css') {
+        echo '<link type="text/css" rel="stylesheet" href="' . base_url() . $output_filename . '" />';
+    } else {
+        echo $output_filename;
+    }
+}
+
+function smarty_combine_read_source($path)
+{
+    $source = file_get_contents($path);
+    if ($source === false) {
+        throw new RuntimeException('Cannot read asset ' . $path);
+    }
+    return $source;
+}
+
+function smarty_combine_minify_file($params, $name, $source = null)
+{
+    $path = $params['file_path'] . $name;
+    if ($source === null) {
+        $source = smarty_combine_read_source($path);
+    }
+    if ($params['type'] === 'js') {
+        return JSMin::minify($source) . ';';
+    }
+    $dirname = dirname(str_replace($_SERVER['DOCUMENT_ROOT'], '', $path));
+    return CSSMin::minify(preg_replace('/url\\(((?>["\']?))(?!(\\/|http(s)?:|data:|#))(.*?)\\1\\)/', 'url("' . $dirname . '/$4")', $source));
 }
 
 function checkWritabeFile($file)

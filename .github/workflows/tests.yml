@@ -1,0 +1,39 @@
+name: Integration tests
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.5']
+        smarty: ['3.1.*', '4.1.*', '^5']
+        include:
+          - smarty: '2.6.33'
+            php: '7.4'
+    name: Smarty ${{ matrix.smarty }}
+    env:
+      SMARTY_CONSTRAINT: ${{ matrix.smarty }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:2.11.2
+          coverage: none
+      - name: Install dependencies
+        shell: bash
+        run: |
+          flags=()
+          # Allow historical releases only in the legacy test jobs.
+          if [[ "$SMARTY_CONSTRAINT" != '^5' ]]; then
+            flags+=(--no-blocking)
+          fi
+          composer update --with "smarty/smarty:$SMARTY_CONSTRAINT" --no-interaction --prefer-dist "${flags[@]}"
+          composer show smarty/smarty
+      - run: composer test
