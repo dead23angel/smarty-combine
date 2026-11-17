@@ -21,10 +21,18 @@ if ($legacy) {
 if (getenv('TEST_VERSION')) {
     define('SMARTY_COMBINE_VERSION', getenv('TEST_VERSION'));
 }
+$manifestMode = isset($argv[1]) && $argv[1] === 'manifest';
+if ($manifestMode) {
+    define('SMARTY_COMBINE_MANIFEST', $root . '/assets.json');
+}
 foreach (array('css', 'js') as $ext) {
-    $smarty->assign('files', array('/first.' . $ext, '/second.' . $ext));
-    $version = isset($argv[1]) ? " version='" . $argv[1] . "'" : '';
-    $source = "{combine input=\$files output='/cache/app." . $ext . "'" . $version . "}";
+    if ($manifestMode) {
+        $source = "{combine bundle='" . $ext . "'}";
+    } else {
+        $smarty->assign('files', array('/first.' . $ext, '/second.' . $ext));
+        $version = isset($argv[1]) ? " version='" . $argv[1] . "'" : '';
+        $source = "{combine input=\$files output='/cache/app." . $ext . "'" . $version . "}";
+    }
     if ($legacy) {
         $file = $ext . '-' . (isset($argv[1]) ? $argv[1] : 'default') . '.tpl';
         file_put_contents($root . '/' . $file, $source);

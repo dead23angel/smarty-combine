@@ -27,6 +27,10 @@
 
 function smarty_function_combine($params, &$smarty)
 {
+    if (isset($params['bundle'])) {
+        smarty_combine_render_bundle($params['bundle']);
+        return;
+    }
     require_once dirname(__FILE__) . '/minify/JSmin.php';
     require_once dirname(__FILE__) . '/minify/CSSmin.php';
 
@@ -296,13 +300,46 @@ function smarty_combine_hash_bundle($params)
         $bundle .= smarty_combine_minify_file($params, $item[0], $item[1]);
     }
     $digest = hash('sha256', $bundle);
-    $filename = preg_replace('/\.(js|css)$/iD', '.' . $digest . '.$1', $params['output']);
-    $target = $params['file_path'] . $filename;
+    $filename = smarty_combine_publish_bundle($params['file_path'], $params['output'], $bundle, $digest);
+    smarty_combine_write_atomic($manifest, $key . ' ' . $digest);
+    return $filename;
+}
+
+function smarty_combine_publish_bundle($root, $output, $bundle, $digest)
+{
+    $filename = preg_replace('/\.(js|css)$/iD', '.' . $digest . '.$1', $output);
+    $target = $root . $filename;
     if (!is_file($target)) {
         smarty_combine_write_atomic($target, $bundle);
     }
-    smarty_combine_write_atomic($manifest, $key . ' ' . $digest);
     return $filename;
+}
+
+function smarty_combine_render_bundle($name)
+{
+    if (!defined('SMARTY_COMBINE_MANIFEST')) {
+        throw new RuntimeException('Set SMARTY_COMBINE_MANIFEST to the built manifest path');
+    }
+    static $entries;
+    if ($entries === null) {
+        $entries = json_decode(smarty_combine_read_source(SMARTY_COMBINE_MANIFEST), true);
+        if (!is_array($entries)) {
+            throw new RuntimeException('Invalid Smarty Combine manifest');
+        }
+    }
+    if (!is_string($name) || !isset($entries[$name]) || !is_string($entries[$name])) {
+        throw new RuntimeException('Unknown Smarty Combine bundle: ' . (is_string($name) ? $name : '(invalid name)'));
+    }
+    $path = $entries[$name];
+    $type = pathinfo($path, PATHINFO_EXTENSION);
+    $url = htmlspecialchars($path, ENT_QUOTES, 'UTF-8');
+    if ($type === 'css') {
+        echo '<link rel="stylesheet" href="' . $url . '" />';
+    } elseif ($type === 'js') {
+        echo '<script src="' . $url . '"></script>';
+    } else {
+        throw new RuntimeException('Invalid bundle extension for ' . $name);
+    }
 }
 
 function smarty_combine_write_atomic($target, $bytes)

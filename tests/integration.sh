@@ -60,3 +60,32 @@ for ext in css js; do
     test "$new" = "/cache/app.$digest.$ext"
 done
 echo 'PASS: CSS and JS, timestamp and hash, default and override, cache reuse and source edits'
+
+cat > smarty-combine.php <<'PHP'
+<?php
+return array(
+    'public_dir' => __DIR__,
+    'manifest' => __DIR__ . '/assets.json',
+    'bundles' => array(
+        'css' => array('input' => array('/first.css', '/second.css'), 'output' => '/dist/site.css'),
+        'js' => array('input' => array('/first.js', '/second.js'), 'output' => '/dist/site.js'),
+    ),
+);
+PHP
+php "$suite/../bin/smarty-combine" build
+rm first.css second.css first.js second.js
+render manifest
+
+# Let the OS choose a free port so parallel runs do not interfere.
+address=$(php -r '$s = stream_socket_server("tcp://127.0.0.1:0"); if (!$s) exit(1); echo stream_socket_get_name($s, false);')
+php -S "$address" -t "$DOCUMENT_ROOT" >server.log 2>&1 &
+server_pid=$!
+trap 'kill "$server_pid" 2>/dev/null || :; wait "$server_pid" 2>/dev/null || :; rm -rf "$DOCUMENT_ROOT"' EXIT
+for attempt in 1 2 3 4 5; do
+    if php -r '$s = @stream_socket_client("tcp://" . $argv[1]); exit($s ? 0 : 1);' "$address"; then
+        break
+    fi
+    sleep 1
+done
+kill -0 "$server_pid" || { cat server.log >&2; exit 1; }
+php "$suite/check-manifest.php" "http://$address"

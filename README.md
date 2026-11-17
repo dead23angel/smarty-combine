@@ -68,7 +68,8 @@ Set `SMARTY_COMBINE_VERSION` in your application's PHP configuration before rend
 
 ## Template parameters
 
-- **`input`** (required) — a non-empty array of local paths in bundle order. All entries in one call must have the same lowercase extension, either `.css` or `.js`.
+- **`bundle`** — name of a prebuilt CSS or JS bundle in the configured manifest. Use this parameter on its own.
+- **`input`** (required for runtime builds) — a non-empty array of local paths in bundle order. All entries in one call must have the same lowercase extension, either `.css` or `.js`.
 - **`output`** — base path for the generated file, including its extension. Defaults to `combined.css` or `combined.js` in the first source file's directory.
 - **`version`** — `hash` or `timestamp`. Defaults to `SMARTY_COMBINE_VERSION` when defined, otherwise `timestamp`.
 - **`use_true_path`** — defaults to `false`, which prefixes filesystem paths with `DOCUMENT_ROOT`. With `true`, paths are used as supplied. The emitted URL still uses the supplied output path, so ensure it maps to a public URL.
@@ -78,6 +79,33 @@ Set `SMARTY_COMBINE_VERSION` in your application's PHP configuration before rend
 
 ## Running the integration tests
 
-From a package checkout with dependencies installed, run `composer test` (PHP CLI and a POSIX shell). The suite renders actual Smarty templates in separate PHP processes so the timestamp builder can finish at request shutdown. All generated files live in a temporary directory.
+From a package checkout with dependencies installed, run `composer test` (PHP CLI and a POSIX shell). The suite renders actual Smarty templates in separate PHP processes so the timestamp builder can finish at request shutdown. The manifest test removes the original sources and fetches both generated assets over local HTTP. All generated files live in a temporary directory.
 
 To select a series in a disposable test checkout, run `composer update --with 'smarty/smarty:4.1.*'` first. Use `2.6.33` on PHP 7.4 for the Smarty 2 job, or substitute `3.1.*` or `^5` for the other PHP 8.5 jobs. Composer may block historical versions due to published advisories. To reproduce those historical tests only, use an isolated test environment and add `--no-blocking` to that update command (tested with Composer 2.11.2).
+
+## Building bundles during deployment
+
+Create a trusted PHP build configuration named `smarty-combine.php` in the application root:
+
+```php
+<?php
+return array(
+    'public_dir' => __DIR__ . '/public',
+    'manifest' => __DIR__ . '/var/assets.json',
+    'bundles' => array(
+        'styles' => array('input' => array('/css/base.css', '/css/theme.css'), 'output' => '/cache/site.css'),
+        'scripts' => array('input' => array('/js/core.js', '/js/app.js'), 'output' => '/cache/app.js'),
+    ),
+);
+```
+
+Run `vendor/bin/smarty-combine build` from that directory, or pass the config path after `build`. Input and output asset paths start at the public root. The command writes bundles with SHA-256 filenames and then atomically replaces the JSON manifest. Deploy the generated bundles before activating the manifest. Keep older hashed files while cached pages can reference them.
+
+In the application bootstrap, define `SMARTY_COMBINE_MANIFEST` as the absolute path to the deployed JSON file. Use the bundle names in templates:
+
+```smarty
+{combine bundle='styles'}
+{combine bundle='scripts'}
+```
+
+Named bundles emit the root-relative URLs recorded in the manifest. Rendering requires read access to the manifest and no source files or writable cache directory. A missing manifest or unknown bundle raises an error. Existing calls that pass `input` continue to use runtime versioning.

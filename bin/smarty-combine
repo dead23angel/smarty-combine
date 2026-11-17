@@ -1,0 +1,53 @@
+#!/usr/bin/env php
+<?php
+require_once dirname(__DIR__) . '/function.combine.php';
+require_once dirname(__DIR__) . '/minify/JSmin.php';
+require_once dirname(__DIR__) . '/minify/CSSmin.php';
+
+if (!isset($argv[1]) || $argv[1] !== 'build' || count($argv) > 3) {
+    fwrite(STDERR, "Usage: smarty-combine build [config.php]\n");
+    exit(1);
+}
+
+try {
+    $file = realpath(isset($argv[2]) ? $argv[2] : 'smarty-combine.php');
+    if (!$file || !is_file($file)) {
+        throw new RuntimeException('Build configuration file not found');
+    }
+    $config = require $file;
+    if (empty($config['public_dir']) || empty($config['manifest']) || empty($config['bundles'])
+        || !is_array($config['bundles'])) {
+        throw new RuntimeException('Expected public_dir, manifest and a non-empty bundles map');
+    }
+    $root = realpath($config['public_dir']);
+    if (!$root || !is_dir($root)) {
+        throw new RuntimeException('Invalid public_dir');
+    }
+    $_SERVER['DOCUMENT_ROOT'] = $root;
+    $entries = array();
+    foreach ($config['bundles'] as $name => $spec) {
+        if (!is_string($name) || empty($spec['input']) || !is_array($spec['input'])
+            || empty($spec['output']) || !preg_match('~^/(?!/).+\.(css|js)$~D', $spec['output'], $match)) {
+            throw new RuntimeException('Invalid bundle definition: ' . $name);
+        }
+        $type = $match[1];
+        $params = array('file_path' => $root, 'type' => $type);
+        $bytes = '';
+        foreach ($spec['input'] as $path) {
+            if (!is_string($path) || substr($path, 0, 1) !== '/' || pathinfo($path, PATHINFO_EXTENSION) !== $type) {
+                throw new RuntimeException('Invalid input for ' . $name);
+            }
+            $bytes .= smarty_combine_minify_file($params, $path);
+        }
+        $entries[$name] = smarty_combine_publish_bundle($root, $spec['output'], $bytes, hash('sha256', $bytes));
+    }
+    $json = json_encode($entries, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    if ($json === false) {
+        throw new RuntimeException('Cannot encode manifest');
+    }
+    smarty_combine_write_atomic($config['manifest'], $json . "\n");
+    echo "Built " . count($entries) . " bundles: " . $config['manifest'] . "\n";
+} catch (Exception $e) {
+    fwrite(STDERR, $e->getMessage() . "\n");
+    exit(1);
+}
