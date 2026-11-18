@@ -123,3 +123,19 @@ Run `vendor/bin/smarty-combine clean [config.php] --dry-run` to preview removal.
 The command uses the same trusted PHP config as `build`. It requires an existing valid manifest and protects its current files plus standard runtime cache targets. It examines only configured output names with SHA-256 or timestamp suffixes. Symlinks and unrelated files are skipped. Build and clean share a manifest lock. Schedule cleanup after deployment, allowing enough retention time for cached HTML. Outputs removed from the config need to be cleaned separately.
 
 Inspect also recognizes escaped quotes/backslashes in literal paths and trailing commas. Review records include a `reason` for dynamic bundle names, unsupported/dynamic inputs, missing input, or an unterminated tag. Variables and filters remain manual-review items.
+
+## Controlling minification
+
+Runtime calls accept a boolean `minify` option:
+
+```smarty
+{combine input=$scripts output='/cache/app.js' minify=false}
+```
+
+Define `SMARTY_COMBINE_MINIFY` as `false` in the application bootstrap to disable minification by default. An explicit template option overrides it. For deployment builds, set `'minify' => false` at the top level of the build configuration or within a bundle. Bundle settings override the build default. The default remains `true`.
+
+With minification disabled, JavaScript source bytes are preserved with a newline/semicolon separator between files, including files ending in a line comment. CSS keeps its formatting while relative `url()` references are still rebased. Changing the option invalidates the hash cache and triggers a timestamp refresh independently of `age`.
+
+The bundled JSMin is not a complete modern JavaScript parser. Regression fixtures cover optional chaining and nullish coalescing, plus CSS custom properties, string whitespace and `calc()`. JSMin corrupts whitespace inside template literals. Minification therefore rejects any JavaScript containing a backtick with an instruction to use `minify=false`. This conservative check also applies to backticks in comments and ordinary strings. Pre-minified modern JavaScript can be combined with minification disabled.
+
+Build tests cover missing inputs and minification errors after an earlier bundle has been produced, parallel writers using the manifest lock, and deterministic retries. A failed build leaves the previous manifest active. Completed files from a failed attempt may remain on disk and can later be removed with `clean`.

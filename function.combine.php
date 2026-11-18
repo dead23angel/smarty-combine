@@ -214,6 +214,7 @@ function smarty_function_combine($params, &$smarty)
         $params['debug'] = false;
     }
 
+    $params['minify'] = smarty_combine_minify_option($params);
     if ($params['debug']) {
         foreach ($params['input'] as $name) {
             smarty_combine_print_tag($params['type'], $name . '?' . filemtime($params['file_path'] . $name));
@@ -229,7 +230,8 @@ function smarty_function_combine($params, &$smarty)
     $marker = $params['file_path'] . $params['cache_file_name'];
     $record = is_file($marker) ? json_decode(smarty_combine_read_source($marker), true) : null;
     if (is_array($record) && isset($record['filename'], $record['checked'], $record['digest'])) {
-        if (!is_file($params['file_path'] . $record['filename'])
+        if (!isset($record['minify']) || $record['minify'] !== $params['minify']
+            || !is_file($params['file_path'] . $record['filename'])
             || time() - $record['checked'] >= max(0, (int) $params['age'])) {
             $record = smarty_combine_timestamp($params);
         }
@@ -283,7 +285,7 @@ function smarty_combine_timestamp($params)
         if (!is_file($params['file_path'] . $filename)) {
             smarty_combine_write_atomic($params['file_path'] . $filename, $bytes);
         }
-        $record = array('filename' => $filename, 'digest' => $digest, 'checked' => time(), 'stamp' => $stamp);
+        $record = array('filename' => $filename, 'digest' => $digest, 'checked' => time(), 'stamp' => $stamp, 'minify' => smarty_combine_minify_option($params));
         smarty_combine_write_atomic($marker, json_encode($record));
         return $record;
     } finally {
@@ -299,7 +301,7 @@ function smarty_combine_hash_bundle($params)
     }
     // Increment the format version when minification or URL rewriting changes.
     $context = hash_init('sha256');
-    hash_update($context, serialize(array(1, $params['type'], $params['file_path'], $_SERVER['DOCUMENT_ROOT'])));
+    hash_update($context, serialize(array(2, smarty_combine_minify_option($params), $params['type'], $params['file_path'], $_SERVER['DOCUMENT_ROOT'])));
     $sources = array();
     foreach ($params['input'] as $name) {
         $source = smarty_combine_read_source($params['file_path'] . $name);
@@ -405,17 +407,32 @@ function smarty_combine_read_source($path)
     return $source;
 }
 
+function smarty_combine_minify_option($params)
+{
+    $value = array_key_exists('minify', $params) ? $params['minify']
+        : (defined('SMARTY_COMBINE_MINIFY') ? SMARTY_COMBINE_MINIFY : true);
+    if (!is_bool($value)) {
+        throw new InvalidArgumentException('minify must be a boolean');
+    }
+    return $value;
+}
+
 function smarty_combine_minify_file($params, $name, $source = null)
 {
     $path = $params['file_path'] . $name;
     if ($source === null) {
         $source = smarty_combine_read_source($path);
     }
+    $minify = smarty_combine_minify_option($params);
     if ($params['type'] === 'js') {
-        return JSMin::minify($source) . ';';
+        if ($minify && strpos($source, chr(96)) !== false) {
+            throw new RuntimeException('JSMin cannot safely process backticks in ' . $name . '. Set minify=false or pre-minify this asset.');
+        }
+        return ($minify ? JSMin::minify($source) : $source) . "\n;\n";
     }
-    $dirname = dirname(str_replace($_SERVER['DOCUMENT_ROOT'], '', $path));
-    return CSSMin::minify(preg_replace('/url\\(((?>["\']?))(?!(\\/|http(s)?:|data:|#))(.*?)\\1\\)/', 'url("' . $dirname . '/$4")', $source));
+    $dirname = rtrim(dirname(str_replace($_SERVER['DOCUMENT_ROOT'], '', $path)), '/');
+    $source = preg_replace('/url\\(((?>["\']?))(?!(\\/|http(s)?:|data:|#))(.*?)\\1\\)/', 'url("' . $dirname . '/$4")', $source);
+    return ($minify ? CSSMin::minify($source) : $source) . "\n";
 }
 
 function checkWritabeFile($file)

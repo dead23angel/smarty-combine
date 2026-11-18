@@ -90,6 +90,14 @@ render timestamp
 contains '/first.css?' page
 render timestamp
 contains '/cache/app_' page
+TEST_MINIFY=false render hash
+cp page unminified-page
+render hash
+if cmp -s unminified-page page; then exit 1; fi
+TEST_MINIFY=false render timestamp
+cp page unminified-page
+render timestamp
+if cmp -s unminified-page page; then exit 1; fi
 echo 'PASS: CSS and JS, timestamp and hash, default and override, cache reuse and source edits'
 
 cat > smarty-combine.php <<'PHP'
@@ -157,3 +165,5 @@ test -f dist/unrelated.css
 php "$suite/check-manifest.php" "http://$address"
 echo 'PASS: clean preserves current assets and unrelated files'
 php "$suite/inspect-cases.php"
+
+php "$suite/build-reliability.php"

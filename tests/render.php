@@ -31,7 +31,7 @@ foreach (array('css', 'js') as $ext) {
     } else {
         $smarty->assign('files', array('/first.' . $ext, '/second.' . $ext));
         $version = isset($argv[1]) ? " version='" . $argv[1] . "'" : '';
-        $source = "{combine age=" . (getenv('TEST_AGE') !== false ? (int) getenv('TEST_AGE') : 3600) . (getenv('TEST_DEBUG') ? " debug=true" : "") . " input=\$files output='/cache/app." . $ext . "'" . $version . "}";
+        $source = "{combine age=" . (getenv('TEST_AGE') !== false ? (int) getenv('TEST_AGE') : 3600) . (getenv('TEST_DEBUG') ? " debug=true" : "") . (getenv('TEST_MINIFY') !== false ? " minify=" . getenv('TEST_MINIFY') : "") . " input=\$files output='/cache/app." . $ext . "'" . $version . "}";
     }
     if ($legacy) {
         $file = $ext . '-' . hash('sha256', $source) . '.tpl';

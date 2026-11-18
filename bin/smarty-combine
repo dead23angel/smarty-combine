@@ -10,7 +10,7 @@ if (isset($argv[1]) && in_array($argv[1], array('inspect', 'clean'), true)) {
         $command = 'combine_' . $argv[1];
         $command(array_slice($argv, 2));
         exit(0);
-    } catch (Exception $e) {
+    } catch (Throwable $e) {
         fwrite(STDERR, $e->getMessage() . "\n");
         exit(1);
     }
@@ -52,6 +52,13 @@ try {
         }
         $type = $match[1];
         $params = array('file_path' => $root, 'type' => $type);
+        if (array_key_exists('minify', $config)) {
+            $params['minify'] = $config['minify'];
+        }
+        if (array_key_exists('minify', $spec)) {
+            $params['minify'] = $spec['minify'];
+        }
+        $params['minify'] = smarty_combine_minify_option($params);
         $bytes = '';
         foreach ($spec['input'] as $path) {
             if (!is_string($path) || substr($path, 0, 1) !== '/' || pathinfo($path, PATHINFO_EXTENSION) !== $type) {
@@ -67,7 +74,7 @@ try {
     }
     smarty_combine_write_atomic($config['manifest'], $json . "\n");
     echo "Built " . count($entries) . " bundles: " . $config['manifest'] . "\n";
-} catch (Exception $e) {
+} catch (Throwable $e) {
     fwrite(STDERR, $e->getMessage() . "\n");
     exit(1);
 }
