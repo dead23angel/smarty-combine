@@ -4,10 +4,11 @@ require_once dirname(__DIR__) . '/function.combine.php';
 require_once dirname(__DIR__) . '/minify/JSmin.php';
 require_once dirname(__DIR__) . '/minify/CSSmin.php';
 
-if (isset($argv[1]) && $argv[1] === 'inspect') {
-    require_once dirname(__DIR__) . '/cli/inspect.php';
+if (isset($argv[1]) && in_array($argv[1], array('inspect', 'clean'), true)) {
+    require_once dirname(__DIR__) . '/cli/' . $argv[1] . '.php';
     try {
-        combine_inspect(array_slice($argv, 2));
+        $command = 'combine_' . $argv[1];
+        $command(array_slice($argv, 2));
         exit(0);
     } catch (Exception $e) {
         fwrite(STDERR, $e->getMessage() . "\n");
@@ -16,7 +17,7 @@ if (isset($argv[1]) && $argv[1] === 'inspect') {
 }
 
 if (!isset($argv[1]) || $argv[1] !== 'build' || count($argv) > 3) {
-    fwrite(STDERR, "Usage: smarty-combine build [config.php]\n       smarty-combine inspect [directory] [--json]\n");
+    fwrite(STDERR, "Usage: smarty-combine build [config.php]\n       smarty-combine inspect [directory] [--json]\n       smarty-combine clean [config.php] [--dry-run] [--keep-seconds=604800]\n");
     exit(1);
 }
 
@@ -35,6 +36,14 @@ try {
         throw new RuntimeException('Invalid public_dir');
     }
     $_SERVER['DOCUMENT_ROOT'] = $root;
+    $lockDir = dirname($config['manifest']);
+    if (!is_dir($lockDir) && !@mkdir($lockDir, 0755, true) && !is_dir($lockDir)) {
+        throw new RuntimeException('Cannot create manifest directory');
+    }
+    $buildLock = fopen($config['manifest'] . '.lock', 'c');
+    if (!$buildLock || !flock($buildLock, LOCK_EX)) {
+        throw new RuntimeException('Cannot lock manifest');
+    }
     $entries = array();
     foreach ($config['bundles'] as $name => $spec) {
         if (!is_string($name) || empty($spec['input']) || !is_array($spec['input'])
@@ -61,4 +70,10 @@ try {
 } catch (Exception $e) {
     fwrite(STDERR, $e->getMessage() . "\n");
     exit(1);
+}
+finally {
+    if (isset($buildLock) && is_resource($buildLock)) {
+        flock($buildLock, LOCK_UN);
+        fclose($buildLock);
+    }
 }

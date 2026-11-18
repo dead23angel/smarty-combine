@@ -31,10 +31,10 @@ foreach (array('css', 'js') as $ext) {
     } else {
         $smarty->assign('files', array('/first.' . $ext, '/second.' . $ext));
         $version = isset($argv[1]) ? " version='" . $argv[1] . "'" : '';
-        $source = "{combine input=\$files output='/cache/app." . $ext . "'" . $version . "}";
+        $source = "{combine age=" . (getenv('TEST_AGE') !== false ? (int) getenv('TEST_AGE') : 3600) . (getenv('TEST_DEBUG') ? " debug=true" : "") . " input=\$files output='/cache/app." . $ext . "'" . $version . "}";
     }
     if ($legacy) {
-        $file = $ext . '-' . (isset($argv[1]) ? $argv[1] : 'default') . '.tpl';
+        $file = $ext . '-' . hash('sha256', $source) . '.tpl';
         file_put_contents($root . '/' . $file, $source);
         echo $smarty->fetch($file);
     } else {

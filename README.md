@@ -4,7 +4,7 @@ Use `{combine}` to render one stylesheet or script tag for an ordered list of lo
 
 ## Compatibility and installation
 
-The package declares PHP **5.6.40 or newer** and Smarty **2.6.33**, **3.1 through 3.x**, **4.1 through 4.x**, or **5.x**. Your PHP version must also satisfy the requirements of the selected Smarty release. Both versioning modes passed on **Smarty 2.6.33 with PHP 7.4.33**. Integration tests also passed with **Smarty 3.1.46, 4.1.1 and 5.9.0** on PHP 8.5.12. Smarty 3.1.46 and 4.1.1 themselves emit deprecation notices on that PHP version.
+The package declares PHP **7.4 or newer** and Smarty **2.6.33**, **3.1 through 3.x**, **4.1 through 4.x**, or **5.x**. Your PHP version must also satisfy the requirements of the selected Smarty release. Both versioning modes passed on **Smarty 2.6.33 with PHP 7.4.33**. Integration tests also passed with **Smarty 3.1.46, 4.1.1 and 5.9.0** on PHP 8.5.12. Smarty 3.1.46 and 4.1.1 themselves emit deprecation notices on that PHP version.
 
 To develop against this checkout, place the application and the `smarty-combine` repository in sibling directories. Run these commands from the application directory with the checkout on `master`:
 
@@ -57,7 +57,7 @@ Call the plugin once per bundle in your template:
 
 Old hashed files remain available to pages that still reference them. Keep them until cached HTML using those URLs has expired. To force a fresh check and minification, remove the corresponding `.hash-cache` file.
 
-**Timestamp mode** is the default when no configuration is set. On a cold request the plugin emits individual source tags and schedules a bundle build at request shutdown. Subsequent normal renders use the timestamp stored on the cache marker to construct the bundle URL, for example `site_20261117120524.css`. To pick up edited sources in this mode, remove the marker (by default `site.css.cache`) before the next request.
+**Timestamp mode** is the default when no configuration is set. A cold request emits individual sources and builds the bundle at shutdown. Existing numeric cache markers are migrated the same way. On later requests, `age` controls how often source content is checked (default 3600 seconds). Changed minified contents produce a new timestamp URL even for edits in the same second. An unchanged bundle keeps its URL. Missing bundle files are regenerated immediately. Old bundle files are retained for cached pages.
 
 Set `SMARTY_COMBINE_VERSION` in your application's PHP configuration before rendering to choose a default for all calls. An explicit template option takes precedence in either direction:
 
@@ -73,8 +73,8 @@ Set `SMARTY_COMBINE_VERSION` in your application's PHP configuration before rend
 - **`output`** — base path for the generated file, including its extension. Defaults to `combined.css` or `combined.js` in the first source file's directory.
 - **`version`** — `hash` or `timestamp`. Defaults to `SMARTY_COMBINE_VERSION` when defined, otherwise `timestamp`.
 - **`use_true_path`** — defaults to `false`, which prefixes filesystem paths with `DOCUMENT_ROOT`. With `true`, paths are used as supplied. The emitted URL still uses the supplied output path, so ensure it maps to a public URL.
-- **`debug`** — boolean, default `false`. Setting it to `true` bypasses hash mode and uses the timestamp-mode debug path. This emits individual source tags when the marker is absent or older than `age`. A recent marker can still produce a bundle tag.
-- **`age`** — marker age threshold in seconds for the timestamp-mode debug check, default `3600`. Hash mode checks source contents on each render regardless of this value.
+- **`debug`** — default `false`. For runtime builds, a truthy value always emits individual source tags with modification-time query strings and performs no bundle writes. Named manifest bundles continue to resolve their manifest URLs.
+- **`age`** — interval in seconds between timestamp-mode content checks, default `3600`. Use `0` to check each render. Hash mode checks source contents on each render.
 - **`cache_file_name`** — overrides the timestamp marker path, which defaults to `output` plus `.cache`. Hash mode uses its own `.hash-cache` record.
 
 ## Running the integration tests
@@ -115,3 +115,11 @@ Named bundles emit the root-relative URLs recorded in the manifest. Rendering re
 Run `vendor/bin/smarty-combine inspect templates` to find combine calls recursively in a directory (`.` by default). Add `--json` for a report with `calls` and `duplicates` arrays. Paths are relative to the scanned directory and line numbers start at 1.
 
 The scanner recognizes standard Smarty delimiters. It skips Smarty comments, literal blocks, symlinks and dependency directories. Literal lists written as `array('/a.js', '/b.js')` or `['/a.js', '/b.js']` are grouped by their exact ordered paths. Different output options may still need separate builds. Named bundles are listed separately. Variables and unrecognized input expressions appear as `review` with the source tag for manual inspection. The report describes template source and does not execute PHP or resolve assigned variables.
+
+## Cleaning obsolete bundles
+
+Run `vendor/bin/smarty-combine clean [config.php] --dry-run` to preview removal. Omit `--dry-run` to delete obsolete generated files. The default retention period is seven days. Override it with `--keep-seconds=86400`, for example.
+
+The command uses the same trusted PHP config as `build`. It requires an existing valid manifest and protects its current files plus standard runtime cache targets. It examines only configured output names with SHA-256 or timestamp suffixes. Symlinks and unrelated files are skipped. Build and clean share a manifest lock. Schedule cleanup after deployment, allowing enough retention time for cached HTML. Outputs removed from the config need to be cleaned separately.
+
+Inspect also recognizes escaped quotes/backslashes in literal paths and trailing commas. Review records include a `reason` for dynamic bundle names, unsupported/dynamic inputs, missing input, or an unterminated tag. Variables and filters remain manual-review items.

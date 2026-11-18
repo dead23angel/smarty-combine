@@ -37,10 +37,21 @@ function combine_inspect_string($expr)
     if (strlen($expr) < 2 || ($expr[0] !== "'" && $expr[0] !== '"') || substr($expr, -1) !== $expr[0]) {
         return null;
     }
-    $value = substr($expr, 1, -1);
-    if (strpos($value, $expr[0]) !== false || strpos($value, '\\') !== false
-        || ($expr[0] === '"' && strpbrk($value, '$`{}') !== false)) {
-        return null;
+    $quote = $expr[0];
+    $value = '';
+    for ($i = 1; $i < strlen($expr) - 1; ++$i) {
+        $c = $expr[$i];
+        if ($c === $quote || ($quote === '"' && strpbrk($c, '$`{}') !== false)) {
+            return null;
+        }
+        if ($c === '\\') {
+            $next = $expr[++$i];
+            if ($next !== $quote && $next !== '\\') {
+                return null;
+            }
+            $c = $next;
+        }
+        $value .= $c;
     }
     return $value;
 }
@@ -53,7 +64,8 @@ function combine_inspect_files($expr)
     $items = isset($m[2]) ? $m[2] : $m[1];
     $offset = 0;
     $files = array();
-    while (preg_match('~\G\s*(\x27[^\x27]*\x27|"[^"]*")\s*(?:,|$)~s', $items, $m, 0, $offset)) {
+    $literal = '(?:\x27(?:\\\\.|[^\x27\\\\])*\x27|"(?:\\\\.|[^"\\\\])*")';
+    while (preg_match('~\G\s*(' . $literal . ')\s*(?:,|$)~s', $items, $m, 0, $offset)) {
         $path = combine_inspect_string($m[1]);
         if ($path === null) {
             return null;
@@ -70,19 +82,21 @@ function combine_inspect_template($source, $file)
     $offset = 0;
     $line = 1;
     // Match whole comments and literal blocks before considering tags inside them.
-    $pattern = '~\{\*.*?(?:\*\}|\z)|\{literal\}.*?(?:\{/literal\}|\z)|\{combine(?=[\s}])((?:[^{}\x22\x27]++|\x22(?:\\\\.|[^\x22\\\\])*\x22|\x27(?:\\\\.|[^\x27\\\\])*\x27|(\{(?:[^{}]++|(?2))*\}))*)\}~is';
+    $pattern = '~\{\*.*?(?:\*\}|\z)|\{literal\}.*?(?:\{/literal\}|\z)|\{combine(?=[\s}])((?:[^{}\x22\x27]++|\x22(?:\\\\.|[^\x22\\\\])*\x22|\x27(?:\\\\.|[^\x27\\\\])*\x27|(\{(?:[^{}]++|(?2))*\}))*)(?:\}|\z)~is';
     while (preg_match($pattern, $source, $match, PREG_OFFSET_CAPTURE, $offset)) {
         list($tag, $pos) = $match[0];
         $line += substr_count(substr($source, $offset, $pos - $offset), "\n");
         if (isset($match[1])) {
             $attrs = combine_inspect_attributes($match[1][0]);
             $call = array('file' => $file, 'line' => $line);
-            if (isset($attrs['bundle']) && ($name = combine_inspect_string($attrs['bundle'])) !== null) {
+            if (substr($tag, -1) !== '}') {
+                $call += array('kind' => 'review', 'expression' => $tag, 'reason' => 'unterminated_tag');
+            } elseif (isset($attrs['bundle']) && ($name = combine_inspect_string($attrs['bundle'])) !== null) {
                 $call += array('kind' => 'bundle', 'bundle' => $name);
             } elseif (!isset($attrs['bundle']) && isset($attrs['input']) && ($files = combine_inspect_files($attrs['input'])) !== null) {
                 $call += array('kind' => 'static', 'files' => $files);
             } else {
-                $call += array('kind' => 'review', 'expression' => $tag);
+                $call += array('kind' => 'review', 'expression' => $tag, 'reason' => isset($attrs['bundle']) ? 'dynamic_bundle' : (isset($attrs['input']) ? 'dynamic_or_unsupported_input' : 'missing_input'));
             }
             $calls[] = $call;
         }

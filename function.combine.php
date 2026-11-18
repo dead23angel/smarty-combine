@@ -214,61 +214,82 @@ function smarty_function_combine($params, &$smarty)
         $params['debug'] = false;
     }
 
+    if ($params['debug']) {
+        foreach ($params['input'] as $name) {
+            smarty_combine_print_tag($params['type'], $name . '?' . filemtime($params['file_path'] . $name));
+        }
+        return;
+    }
     $version = isset($params['version']) ? $params['version']
         : (defined('SMARTY_COMBINE_VERSION') ? SMARTY_COMBINE_VERSION : 'timestamp');
-    if ($version === 'hash' && !$params['debug']) {
+    if ($version === 'hash') {
         smarty_combine_print_tag($params['type'], smarty_combine_hash_bundle($params));
         return;
     }
-
-    /** Build combine in background fastcgi_finish_request() */
-    if ( ! function_exists('build_cache_combine')) {
-        function build_cache_combine($params){
-			register_shutdown_function(function($params){
-				ignore_user_abort(true);
-
-				if (function_exists('fastcgi_finish_request')) {
-					fastcgi_finish_request();
-				}
-
-				smarty_build_combine($params, true);
-			}, $params);
+    $marker = $params['file_path'] . $params['cache_file_name'];
+    $record = is_file($marker) ? json_decode(smarty_combine_read_source($marker), true) : null;
+    if (is_array($record) && isset($record['filename'], $record['checked'], $record['digest'])) {
+        if (!is_file($params['file_path'] . $record['filename'])
+            || time() - $record['checked'] >= max(0, (int) $params['age'])) {
+            $record = smarty_combine_timestamp($params);
         }
+        smarty_combine_print_tag($params['type'], $record['filename']);
+        return;
     }
+    // Cold caches and legacy numeric markers are rebuilt after the response.
+    foreach ($params['input'] as $name) {
+        smarty_combine_print_tag($params['type'], $name . '?' . filemtime($params['file_path'] . $name));
+    }
+    register_shutdown_function('smarty_combine_timestamp', $params);
+    return;
+}
 
-	$file_cache_exists = file_exists($params['file_path'] . $params['cache_file_name']);
-
-    $cache_mtime = $file_cache_exists ? filemtime($params['file_path'] . $params['cache_file_name']) : 0;
-
-    if ($params['debug'] === true || !$file_cache_exists) {
-		$time = time();
-
-		if($cache_mtime + $params['age'] < $time) {
-            $filelist = array();
-
-            foreach ($params['input'] as $item) {
-                $filelist[] = ['name' => $item];
+function smarty_combine_timestamp($params)
+{
+    $marker = $params['file_path'] . $params['cache_file_name'];
+    $dir = dirname($marker);
+    if (!is_dir($dir) && !@mkdir($dir, 0755, true) && !is_dir($dir)) {
+        throw new RuntimeException('Cannot create cache directory');
+    }
+    $lock = fopen($marker . '.lock', 'c');
+    if (!$lock || !flock($lock, LOCK_EX)) {
+        throw new RuntimeException('Cannot lock timestamp cache');
+    }
+    try {
+        $old = is_file($marker) ? json_decode(smarty_combine_read_source($marker), true) : null;
+        $bytes = '';
+        foreach ($params['input'] as $name) {
+            $bytes .= smarty_combine_minify_file($params, $name);
+        }
+        $digest = hash('sha256', $bytes);
+        if (is_array($old) && isset($old['digest'], $old['filename'], $old['stamp'])
+            && $old['digest'] === $digest) {
+            $filename = $old['filename'];
+            $stamp = $old['stamp'];
+        } else {
+            $stamp = max(time(), is_array($old) && isset($old['stamp']) ? $old['stamp'] + 1 : 0);
+            $filename = preg_replace('/\.(js|css)$/iD', date('_YmdHis.', $stamp) . '$1', $params['output'], 1, $count);
+            if (!$count) {
+                throw new RuntimeException('Timestamp versioning requires a .css or .js output filename');
             }
-
-			$out = '';
-			foreach ($filelist as $file) {
-				if ($params['type'] == 'js') {
-					$out .= '<script type="text/javascript" src="' . base_url() . $file['name'] . '?' . $time . '" charset="utf-8"></script>' . "\n";
-				} elseif ($params['type'] == 'css') {
-					$out .= '<link type="text/css" rel="stylesheet" href="' . base_url() . $file['name'] . '?' . $time . '" />' . "\n";
-				}
-			}
-
-			echo $out;
-
-			//smarty_build_combine($params);
-			register_shutdown_function('build_cache_combine', $params);
-
-			return;
-		}
+        }
+        if (is_file($params['file_path'] . $filename)
+            && hash_file('sha256', $params['file_path'] . $filename) !== $digest) {
+            do {
+                ++$stamp;
+                $filename = preg_replace('/\.(js|css)$/iD', date('_YmdHis.', $stamp) . '$1', $params['output']);
+            } while (is_file($params['file_path'] . $filename));
+        }
+        if (!is_file($params['file_path'] . $filename)) {
+            smarty_combine_write_atomic($params['file_path'] . $filename, $bytes);
+        }
+        $record = array('filename' => $filename, 'digest' => $digest, 'checked' => time(), 'stamp' => $stamp);
+        smarty_combine_write_atomic($marker, json_encode($record));
+        return $record;
+    } finally {
+        flock($lock, LOCK_UN);
+        fclose($lock);
     }
-
-	smarty_print_out($params);
 }
 
 function smarty_combine_hash_bundle($params)

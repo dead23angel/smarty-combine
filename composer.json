@@ -1,11 +1,16 @@
-
 {
     "name": "dead23angel/smarty-combine",
-    "description": "Combine and minify many JS or CSS to one file.",
+    "description": "Combine and minify CSS and JavaScript for Smarty with content-hashed bundles, deployment manifests and template inspection.",
     "license": "MIT",
     "keywords": [
         "smarty",
-        "minify"
+        "css",
+        "javascript",
+        "minify",
+        "assets",
+        "bundler",
+        "cache",
+        "manifest"
     ],
     "authors": [
         {
@@ -24,12 +29,14 @@
             "role": "Developer"
         }
     ],
-    "bin": ["bin/smarty-combine"],
+    "bin": [
+        "bin/smarty-combine"
+    ],
     "scripts": {
         "test": "sh tests/integration.sh"
     },
     "require": {
-        "php": ">=5.6.40",
+        "php": ">=7.4",
         "smarty/smarty": "2.6.33|~3.1|~4.1|^5.0"
     }
 }

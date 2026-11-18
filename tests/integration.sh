@@ -59,6 +59,37 @@ for ext in css js; do
     digest=$(php -r 'echo hash_file("sha256", $argv[1]);' ".$new")
     test "$new" = "/cache/app.$digest.$ext"
 done
+render timestamp
+cmp timestamp-page page
+TEST_DEBUG=1 render timestamp
+contains '/first.css?' page
+contains '/first.js?' page
+TEST_DEBUG=1 render hash
+contains '/first.css?' page
+TEST_AGE=0 render timestamp
+if cmp -s timestamp-page page; then exit 1; fi
+for ext in css js; do
+    path=$(grep -Eo "/cache/app_[0-9]{14}\.$ext" page)
+    test -s ".$path"
+done
+cp page updated-timestamp
+TEST_AGE=0 render timestamp
+cmp updated-timestamp page
+for ext in css js; do
+    path=$(grep -Eo "/cache/app_[0-9]{14}\.$ext" page)
+    rm ".$path"
+done
+render timestamp
+cmp updated-timestamp page
+for ext in css js; do
+    path=$(grep -Eo "/cache/app_[0-9]{14}\.$ext" page)
+    test -s ".$path"
+done
+printf 1700000000 > cache/app.css.cache
+render timestamp
+contains '/first.css?' page
+render timestamp
+contains '/cache/app_' page
 echo 'PASS: CSS and JS, timestamp and hash, default and override, cache reuse and source edits'
 
 cat > smarty-combine.php <<'PHP'
@@ -112,3 +143,17 @@ if (!$r || array_column($r["calls"], "kind") !== array("static", "static", "stat
     exit(1);
 }'
 echo 'PASS: inspect reports ordered duplicates and dynamic inputs'
+
+old=dist/site.0000000000000000000000000000000000000000000000000000000000000000.css
+printf old > "$old"
+touch -t 200001010000 "$old"
+printf unrelated > dist/unrelated.css
+php "$suite/../bin/smarty-combine" clean --dry-run >clean.log
+contains "$old" clean.log
+test -f "$old"
+php "$suite/../bin/smarty-combine" clean >clean.log
+test ! -f "$old"
+test -f dist/unrelated.css
+php "$suite/check-manifest.php" "http://$address"
+echo 'PASS: clean preserves current assets and unrelated files'
+php "$suite/inspect-cases.php"
